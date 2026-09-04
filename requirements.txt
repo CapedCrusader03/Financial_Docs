@@ -1,0 +1,13 @@
+beautifulsoup4==4.13.4
+fastapi==0.115.12
+httpx==0.28.1
+openai==1.75.0
+pgvector==0.3.6
+psycopg[binary]==3.2.6
+pydantic==2.11.3
+pydantic-settings==2.8.1
+python-dotenv==1.1.0
+pytest==8.3.5
+uvicorn[standard]==0.34.2
+# PDF-only fallback; install separately when enabling /ingest/pdf.
+docling==2.31.0
