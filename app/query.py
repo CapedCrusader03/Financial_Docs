@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.db import connection, vector_literal
-from app.llm import LLMService
+from app.llm import GeminiService
 from app.schemas import Answer, Route
 
 
@@ -50,7 +50,7 @@ def _taxonomy(company: str) -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
-def resolve_concept(term: str, company: str, llm: LLMService) -> str:
+def resolve_concept(term: str, company: str, llm: GeminiService) -> str:
     key = term.strip().lower()
     with connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT xbrl_concept FROM concept_mappings WHERE natural_language_term=%s", (key,))
@@ -107,8 +107,8 @@ def structured_query(filing_ids: list[str], concept: str, aggregation: str) -> l
     return result or []
 
 
-def narrative_search(question: str, filings: list[dict[str, Any]], section_hint: str | None, llm: LLMService) -> list[dict[str, str]]:
-    embedding = llm.embed([question])[0]
+def narrative_search(question: str, filings: list[dict[str, Any]], section_hint: str | None, llm: GeminiService) -> list[dict[str, str]]:
+    embedding = llm.embed([question], purpose="query")[0]
     ids = [item["id"] for item in filings]
     filters: list[str] = []
     if section_hint:
@@ -139,7 +139,7 @@ def narrative_search(question: str, filings: list[dict[str, Any]], section_hint:
 
 
 def answer_question(company: str, question: str) -> Answer:
-    llm = LLMService()
+    llm = GeminiService()
     route: Route = llm.classify(question)  # Classification occurs before any database access.
     filings = resolve_filing_periods(company, route.periods)
     structured: list[dict[str, Any]] = []

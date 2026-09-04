@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FilingLens · Financial filing Q&A</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">EDGAR + XBRL · evidence-first</p>
+        <h1>Filing<span>Lens</span></h1>
+        <p class="lede">Ingest a public filing, then ask it a precise financial question.</p>
+      </header>
+
+      <section class="ingest-grid" aria-label="Ingestion controls">
+        <article class="panel">
+          <div class="panel-heading"><span class="badge">01</span><div><h2>SEC EDGAR</h2><p>Fetch HTML narrative and XBRL facts directly from EDGAR.</p></div></div>
+          <form id="sec-form" class="form-stack">
+            <label>Ticker<input name="ticker" value="NVDA" maxlength="10" required autocapitalize="characters" /></label>
+            <label>Filing type<select name="filing_type"><option value="10-Q">Latest 10-Q</option><option value="10-K">Latest 10-K</option></select></label>
+            <label>Accession number <span class="muted">optional</span><input name="accession_number" placeholder="0001045810-26-000123" /></label>
+            <button type="submit">Ingest from SEC <span>→</span></button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading"><span class="badge">02</span><div><h2>PDF-only filing</h2><p>Uses Docling’s table-aware extraction path.</p></div></div>
+          <form id="pdf-form" class="form-stack" enctype="multipart/form-data">
+            <label>PDF file<input type="file" name="file" accept="application/pdf,.pdf" required /></label>
+            <div class="two-col"><label>Company<input name="company" placeholder="NVIDIA Corporation" required /></label><label>Ticker<input name="ticker" placeholder="NVDA" required /></label></div>
+            <div class="two-col"><label>Filing type<select name="filing_type"><option>10-Q</option><option>10-K</option></select></label><label>Fiscal period<input name="fiscal_period" placeholder="2026-04-26" required /></label></div>
+            <label>Filed date<input type="date" name="filed_date" required /></label>
+            <button type="submit">Upload & ingest <span>↑</span></button>
+          </form>
+        </article>
+      </section>
+
+      <section class="ask panel" aria-label="Question and answer">
+        <div class="ask-heading"><div><p class="eyebrow">03 · Ask</p><h2>Query an ingested filing</h2></div><span id="status" class="status">Ready</span></div>
+        <form id="ask-form" class="ask-form">
+          <label class="company-field">Ticker or company<input name="company" value="NVDA" required /></label>
+          <label class="question-field">Question<textarea name="question" required placeholder="Why did revenue rise in the latest quarter?"></textarea></label>
+          <button type="submit">Ask filing <span>↗</span></button>
+        </form>
+        <div class="examples"><button data-question="What was revenue in the latest quarter?">Latest revenue</button><button data-question="Why did revenue rise in the latest quarter?">Why revenue changed</button><button data-question="What are the major risk factors?">Risk factors</button></div>
+      </section>
+
+      <section id="result" class="result empty" aria-live="polite">
+        <div class="result-placeholder">Results will appear here with the exact structured and narrative evidence used.</div>
+      </section>
+    </main>
+    <template id="loading-template"><div class="loading"><i></i><span>Working with the filing…</span></div></template>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

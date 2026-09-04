@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS narrative_chunks (
   filing_id UUID NOT NULL REFERENCES filings(id) ON DELETE CASCADE,
   section TEXT NOT NULL,
   text TEXT NOT NULL,
-  embedding VECTOR(1536) NOT NULL,
+  embedding VECTOR(384) NOT NULL,
   content_kind TEXT NOT NULL DEFAULT 'narrative' CHECK (content_kind IN ('narrative', 'table_markdown'))
 );
 CREATE INDEX IF NOT EXISTS narrative_chunks_filing_section_idx ON narrative_chunks(filing_id, section);

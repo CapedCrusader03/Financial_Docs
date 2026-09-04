@@ -18,12 +18,16 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Set an SEC-compliant `SEC_USER_AGENT` and `OPENAI_API_KEY` in `.env`. Then ingest Nvidia's most recent 10-Q:
+Set an SEC-compliant `SEC_USER_AGENT` and `GEMINI_API_KEY` in `.env`. Then ingest Nvidia's most recent 10-Q:
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/sec -ContentType application/json -Body '{"ticker":"NVDA","filing_type":"10-Q"}'
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/ask -ContentType application/json -Body '{"company":"NVDA","question":"What was revenue in the latest quarter?"}'
 ```
+
+## Browser testing UI
+
+With Uvicorn running, open [http://127.0.0.1:8000/](http://127.0.0.1:8000/). The dashboard can ingest a latest SEC filing, upload a PDF-only filing along with its required metadata, submit a question, and show the resulting structured SQL evidence and judge-ranked narrative excerpts. Uploaded source PDFs are kept locally under `data/uploads/` and are git-ignored.
 
 Run seeded, independently verifiable evals after ingestion:
 
@@ -32,7 +36,17 @@ python -m app.seed_evals --ticker NVDA
 python -m app.evals --ticker NVDA
 ```
 
-The API requires an LLM configuration for routing, concept resolution, synthesis, and the required judge reranker. Numeric facts are nevertheless calculated only in PostgreSQL.
+The API uses Gemini for routing, embeddings, concept resolution, synthesis, and the required Gemini judge reranker. Numeric facts are nevertheless calculated only in PostgreSQL.
+
+Use a Gemini API key from Google AI Studio (not an OpenAI key):
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+EMBEDDING_MODEL=gemini-embedding-2
+```
+
+The vector column remains 1,536 dimensions. If you previously ingested data with OpenAI embeddings, clear and re-ingest `narrative_chunks` after this migration; embeddings from different providers must not share a similarity index.
 
 ## Boundaries and source policy
 

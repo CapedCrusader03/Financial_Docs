@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 from app.db import connection
 from app.ingestion import cross_check_xbrl_pdf
-from app.llm import LLMService
+from app.llm import GeminiService
 
 SCALE = re.compile(r"(?:\$|US\$)?\s*\(?\s*in\s+(thousands|millions|billions)\s*(?:of\s+dollars)?\s*\)?", re.I)
 FOOTNOTE = re.compile(r"(?<=[\d\)])[*†‡a-zA-Z]+$")
@@ -110,7 +110,7 @@ def ingest_pdf(path: str, company: str, ticker: str, filing_type: str, fiscal_pe
         if rows:
             cur.executemany("INSERT INTO facts(filing_id,concept,period,value,unit,source,confidence,context) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
         if table_chunks:
-            vectors = LLMService().embed([text for _, text in table_chunks])
+            vectors = GeminiService().embed([text for _, text in table_chunks])
             cur.executemany("INSERT INTO narrative_chunks(filing_id,section,text,embedding,content_kind) VALUES (%s,%s,%s,%s,'table_markdown')",
                             [(filing_id, section, text, vector) for (section, text), vector in zip(table_chunks, vectors, strict=True)])
     xbrl_pdf_flags = cross_check_xbrl_pdf(filing_id)

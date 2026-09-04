@@ -7,7 +7,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from app.db import connection
-from app.llm import LLMService
+from app.llm import GeminiService
 from app.narrative import NarrativePart, extract_sections, header_aware_chunks
 from app.sec import EdgarClient, FilingRef
 
@@ -59,7 +59,7 @@ def _store_xbrl_facts(filing_id: str, accession: str, payload: dict[str, Any]) -
     return len(rows)
 
 
-def _store_narrative(filing_id: str, html: str, llm: LLMService) -> int:
+def _store_narrative(filing_id: str, html: str, llm: GeminiService) -> int:
     chunks = [chunk for section in extract_sections(html) for chunk in header_aware_chunks(section)]
     if not chunks:
         return 0
@@ -96,7 +96,7 @@ def ingest_sec(ticker: str, filing_type: str, accession_number: str | None = Non
     ref = client.select_filing(ticker, filing_type, accession_number)
     filing_id = _insert_filing(ref)
     facts = _store_xbrl_facts(filing_id, ref.accession, client.company_facts(ref.cik))
-    chunks = _store_narrative(filing_id, client.fetch_primary_html(ref), LLMService())
+    chunks = _store_narrative(filing_id, client.fetch_primary_html(ref), GeminiService())
     flags = cross_check_xbrl_pdf(filing_id)
     return {"filing_id": filing_id, "ticker": ref.ticker, "filing_type": ref.form, "period": ref.report_date,
             "source_url": ref.html_url, "xbrl_facts": facts, "narrative_chunks": chunks, "validation_flags": flags}
