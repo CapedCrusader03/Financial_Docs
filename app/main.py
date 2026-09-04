@@ -12,6 +12,7 @@ from app.ingestion import ingest_sec
 from app.pdf_fallback import ingest_pdf
 from app.query import answer_question
 from app.schemas import Answer, AskRequest, PDFIngestRequest, SECIngestRequest
+from app.tracing import get_trace
 
 app = FastAPI(title="Financial Filings Q&A", version="0.1.0")
 logger = logging.getLogger(__name__)
@@ -40,6 +41,17 @@ def dashboard() -> FileResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/traces/{trace_id}")
+def trace(trace_id: str) -> dict:
+    try:
+        result = get_trace(trace_id)
+    except OperationalError as exc:
+        _raise_service_error(exc)
+    if not result:
+        raise HTTPException(status_code=404, detail="Query trace not found.")
+    return result
 
 
 @app.post("/ingest/sec")

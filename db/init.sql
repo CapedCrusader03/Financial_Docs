@@ -61,3 +61,24 @@ CREATE TABLE IF NOT EXISTS eval_cases (
   last_run_result TEXT,
   last_run_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS query_traces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company TEXT NOT NULL,
+  question TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed')),
+  intent TEXT,
+  error TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS query_trace_events (
+  id BIGSERIAL PRIMARY KEY,
+  trace_id UUID NOT NULL REFERENCES query_traces(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (trace_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS query_trace_events_trace_idx ON query_trace_events(trace_id, sequence);

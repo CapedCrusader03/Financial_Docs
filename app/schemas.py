@@ -35,5 +35,6 @@ class Route(BaseModel):
 class Answer(BaseModel):
     answer: str
     intent: str
+    trace_id: str | None = None
     structured_evidence: list[dict] = Field(default_factory=list)
     narrative_evidence: list[dict] = Field(default_factory=list)

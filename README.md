@@ -48,6 +48,10 @@ EMBEDDING_MODEL=gemini-embedding-2
 
 The vector column remains 1,536 dimensions. If you previously ingested data with OpenAI embeddings, clear and re-ingest `narrative_chunks` after this migration; embeddings from different providers must not share a similarity index.
 
+## Execution traces
+
+Every `/ask` response includes a `trace_id`. The app stores the route classification, period and concept decisions, executed parameterized SQL templates and safe parameters, vector-search filter, Gemini judge order, and status in `query_traces` / `query_trace_events`. Retrieve a trace at `GET /traces/{trace_id}`, or expand **Execution trace** beneath an answer in the browser UI. API keys and embedding values are never recorded.
+
 ## Boundaries and source policy
 
 `/ingest/sec` uses EDGAR's submissions endpoint to select the filing, the filing's primary HTML document for narrative sections, and the company-facts endpoint for XBRL facts. PDF ingestion is available only through `/ingest/pdf`; it uses Docling and never a plain-text/PyPDF table extractor. The Docker database is the single system of record; there is no separate generic vector database to drift from the facts store.

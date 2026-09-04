@@ -28,13 +28,25 @@ function showIngest(data, label) {
   setStatus('Ready', '');
 }
 
-function showAnswer(data) {
+async function traceHtml(traceId) {
+  if (!traceId) return '';
+  try {
+    const trace = await request(`/traces/${encodeURIComponent(traceId)}`);
+    const events = trace.events.map(event => `<details class="trace-event"><summary><span>${String(event.sequence).padStart(2, '0')}</span>${escapeHtml(event.stage)}</summary><pre>${escapeHtml(JSON.stringify(event.payload, null, 2))}</pre></details>`).join('');
+    return `<details class="trace" open><summary>Execution trace <code>${escapeHtml(trace.id)}</code></summary><p>Stored internally in Postgres. SQL is parameterized; API keys and vector values are redacted.</p>${events}</details>`;
+  } catch {
+    return `<p class="trace-unavailable">Trace ID: ${escapeHtml(traceId)} (events could not be loaded)</p>`;
+  }
+}
+
+async function showAnswer(data) {
   const structured = data.structured_evidence?.length ? escapeHtml(JSON.stringify(data.structured_evidence, null, 2)) : 'No structured evidence used.';
   const narrative = data.narrative_evidence?.length
     ? data.narrative_evidence.map(chunk => `<div class="chunk"><strong>${escapeHtml(chunk.section)} · ${escapeHtml(chunk.fiscal_period)}</strong><p>${escapeHtml(chunk.text)}</p></div>`).join('')
     : '<p>No narrative evidence used.</p>';
   result.className = 'result';
-  result.innerHTML = `<div class="result-content"><div class="result-top"><div><p class="eyebrow">Answer</p><h3>Filing evidence</h3></div><span class="intent">${escapeHtml(data.intent)}</span></div><p class="answer">${escapeHtml(data.answer)}</p><div class="evidence-grid"><article class="evidence"><h4>Structured SQL evidence</h4><pre>${structured}</pre></article><article class="evidence"><h4>Judge-ranked narrative evidence</h4>${narrative}</article></div></div>`;
+  const trace = await traceHtml(data.trace_id);
+  result.innerHTML = `<div class="result-content"><div class="result-top"><div><p class="eyebrow">Answer</p><h3>Filing evidence</h3></div><span class="intent">${escapeHtml(data.intent)}</span></div><p class="answer">${escapeHtml(data.answer)}</p><div class="evidence-grid"><article class="evidence"><h4>Structured SQL evidence</h4><pre>${structured}</pre></article><article class="evidence"><h4>Judge-ranked narrative evidence</h4>${narrative}</article></div>${trace}</div>`;
   setStatus('Ready', '');
 }
 

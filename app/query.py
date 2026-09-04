@@ -7,28 +7,33 @@ from typing import Any
 from app.db import connection, vector_literal
 from app.llm import GeminiService
 from app.schemas import Answer, Route
+from app.tracing import QueryTrace
 
 
-def _company_filings(company: str) -> list[dict[str, Any]]:
-    with connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """SELECT id::text, fiscal_period, filed_date::text, filing_type
+def _company_filings(company: str, trace: QueryTrace) -> list[dict[str, Any]]:
+    sql = """SELECT id::text, fiscal_period, filed_date::text, filing_type
                FROM filings WHERE upper(ticker)=upper(%s) OR company ILIKE %s
-               ORDER BY filed_date DESC""", (company, f"%{company}%"),
-        )
-        return [
+               ORDER BY filed_date DESC"""
+    trace.event("sql", {"name": "list_company_filings", "statement": sql, "parameters": {"company": company, "company_like": f"%{company}%"}})
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (company, f"%{company}%"))
+        filings = [
             {"id": str(row[0]), "fiscal_period": row[1], "filed_date": row[2], "filing_type": row[3]}
             for row in cur.fetchall()
         ]
+    trace.event("sql_result", {"name": "list_company_filings", "row_count": len(filings)})
+    return filings
 
 
-def resolve_filing_periods(company: str, references: list[str]) -> list[dict[str, Any]]:
+def resolve_filing_periods(company: str, references: list[str], trace: QueryTrace) -> list[dict[str, Any]]:
     """Resolve human period references to stored filing IDs before retrieval or ranking."""
-    filings = _company_filings(company)
+    filings = _company_filings(company, trace)
     if not filings:
         raise LookupError(f"No ingested filings found for {company}.")
     if not references or any("latest" in ref.lower() for ref in references):
-        return [filings[0]]
+        selected = [filings[0]]
+        trace.event("period_resolution", {"references": references, "resolved_filings": selected, "rule": "latest_or_unspecified"})
+        return selected
     selected: list[dict[str, Any]] = []
     for reference in references:
         ref = reference.lower()
@@ -37,33 +42,41 @@ def resolve_filing_periods(company: str, references: list[str]) -> list[dict[str
                 selected.append(filings[1])
         else:
             selected.extend(item for item in filings if reference in item["fiscal_period"])
-    return selected or [filings[0]]
+    resolved = selected or [filings[0]]
+    trace.event("period_resolution", {"references": references, "resolved_filings": resolved, "rule": "reference_match_or_latest_fallback"})
+    return resolved
 
 
-def _taxonomy(company: str) -> list[str]:
+def _taxonomy(company: str, trace: QueryTrace) -> list[str]:
+    sql = """SELECT DISTINCT fa.concept FROM facts fa JOIN filings f ON f.id=fa.filing_id
+               WHERE upper(f.ticker)=upper(%s) OR f.company ILIKE %s ORDER BY fa.concept"""
+    trace.event("sql", {"name": "list_available_xbrl_concepts", "statement": sql, "parameters": {"company": company, "company_like": f"%{company}%"}})
     with connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """SELECT DISTINCT fa.concept FROM facts fa JOIN filings f ON f.id=fa.filing_id
-               WHERE upper(f.ticker)=upper(%s) OR f.company ILIKE %s ORDER BY fa.concept""",
-            (company, f"%{company}%"),
-        )
-        return [row[0] for row in cur.fetchall()]
+        cur.execute(sql, (company, f"%{company}%"))
+        taxonomy = [row[0] for row in cur.fetchall()]
+    trace.event("sql_result", {"name": "list_available_xbrl_concepts", "row_count": len(taxonomy)})
+    return taxonomy
 
 
-def resolve_concept(term: str, company: str, llm: GeminiService) -> str:
+def resolve_concept(term: str, company: str, llm: GeminiService, trace: QueryTrace) -> str:
     key = term.strip().lower()
+    lookup_sql = "SELECT xbrl_concept FROM concept_mappings WHERE natural_language_term=%s"
+    trace.event("sql", {"name": "concept_cache_lookup", "statement": lookup_sql, "parameters": {"natural_language_term": key}})
     with connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT xbrl_concept FROM concept_mappings WHERE natural_language_term=%s", (key,))
+        cur.execute(lookup_sql, (key,))
         row = cur.fetchone()
         if row:
+            trace.event("concept_resolution", {"term": key, "xbrl_concept": row[0], "cache": "hit"})
             return row[0]
-    concept = llm.map_concept(key, _taxonomy(company))
+    taxonomy = _taxonomy(company, trace)
+    trace.event("concept_resolution", {"term": key, "cache": "miss", "taxonomy_size": len(taxonomy), "decision": "Gemini taxonomy-constrained mapping"})
+    concept = llm.map_concept(key, taxonomy)
+    upsert_sql = """INSERT INTO concept_mappings(natural_language_term,xbrl_concept,cached_at) VALUES (%s,%s,CURRENT_TIMESTAMP)
+               ON CONFLICT (natural_language_term) DO UPDATE SET xbrl_concept=EXCLUDED.xbrl_concept,cached_at=EXCLUDED.cached_at"""
+    trace.event("sql", {"name": "concept_cache_upsert", "statement": upsert_sql, "parameters": {"natural_language_term": key, "xbrl_concept": concept}})
     with connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """INSERT INTO concept_mappings(natural_language_term,xbrl_concept,cached_at) VALUES (%s,%s,CURRENT_TIMESTAMP)
-               ON CONFLICT (natural_language_term) DO UPDATE SET xbrl_concept=EXCLUDED.xbrl_concept,cached_at=EXCLUDED.cached_at""",
-            (key, concept),
-        )
+        cur.execute(upsert_sql, (key, concept))
+    trace.event("concept_resolution", {"term": key, "xbrl_concept": concept, "cache": "stored"})
     return concept
 
 
@@ -79,7 +92,7 @@ AGGREGATE_EXPRESSIONS = {
 }
 
 
-def structured_query(filing_ids: list[str], concept: str, aggregation: str) -> list[dict[str, Any]]:
+def structured_query(filing_ids: list[str], concept: str, aggregation: str, trace: QueryTrace) -> list[dict[str, Any]]:
     if aggregation not in AGGREGATE_EXPRESSIONS:
         raise ValueError(f"Unsupported aggregate template: {aggregation}")
     # A filing's report date resolves the comparison. The window chooses the shortest
@@ -101,13 +114,16 @@ def structured_query(filing_ids: list[str], concept: str, aggregation: str) -> l
     ), selected AS (SELECT * FROM ranked WHERE choice=1)
     SELECT {expression} AS result FROM selected
     """
+    trace.event("sql", {"name": "structured_fact_aggregate", "statement": sql, "parameters": {"filing_ids": filing_ids, "concept": concept}, "template": aggregation})
     with connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (filing_ids, concept))
         result = cur.fetchone()[0]
-    return result or []
+    normalized = result or []
+    trace.event("sql_result", {"name": "structured_fact_aggregate", "result": normalized})
+    return normalized
 
 
-def narrative_search(question: str, filings: list[dict[str, Any]], section_hint: str | None, llm: GeminiService) -> list[dict[str, str]]:
+def narrative_search(question: str, filings: list[dict[str, Any]], section_hint: str | None, llm: GeminiService, trace: QueryTrace) -> list[dict[str, str]]:
     embedding = llm.embed([question], purpose="query")[0]
     ids = [item["id"] for item in filings]
     filters: list[str] = []
@@ -119,15 +135,14 @@ def narrative_search(question: str, filings: list[dict[str, Any]], section_hint:
     filters.append("%")
 
     candidates: list[dict[str, str]] = []
-    with connection() as conn, conn.cursor() as cur:
-        for section_filter in filters:
-            cur.execute(
-                """SELECT nc.section, nc.text, f.fiscal_period, 1 - (nc.embedding <=> %s::vector) AS semantic_score
+    sql = """SELECT nc.section, nc.text, f.fiscal_period, 1 - (nc.embedding <=> %s::vector) AS semantic_score
                    FROM narrative_chunks nc JOIN filings f ON f.id=nc.filing_id
                    WHERE nc.filing_id=ANY(%s::uuid[]) AND nc.section ILIKE %s
-                   ORDER BY nc.embedding <=> %s::vector LIMIT 8""",
-                (vector_literal(embedding), ids, section_filter, vector_literal(embedding)),
-            )
+                   ORDER BY nc.embedding <=> %s::vector LIMIT 8"""
+    with connection() as conn, conn.cursor() as cur:
+        for section_filter in filters:
+            trace.event("sql", {"name": "filtered_narrative_vector_search", "statement": sql, "parameters": {"filing_ids": ids, "section_filter": section_filter, "embedding": "redacted (1536 dimensions)"}})
+            cur.execute(sql, (vector_literal(embedding), ids, section_filter, vector_literal(embedding)))
             candidates = [
                 {"section": row[0], "text": row[1], "fiscal_period": row[2], "semantic_score": row[3]}
                 for row in cur.fetchall()
@@ -135,28 +150,35 @@ def narrative_search(question: str, filings: list[dict[str, Any]], section_hint:
             if candidates:
                 break
     order = llm.judge_rerank(question, candidates)
+    trace.event("narrative_retrieval", {"candidate_count": len(candidates), "section_filters_attempted": filters, "judge_rank_order": order, "selected_count": min(4, len(order))})
     return [candidates[index] for index in order[:4]]
 
 
 def answer_question(company: str, question: str) -> Answer:
     llm = GeminiService()
     route: Route = llm.classify(question)  # Classification occurs before any database access.
-    filings = resolve_filing_periods(company, route.periods)
-    structured: list[dict[str, Any]] = []
-    if route.intent in {"aggregate", "hybrid"}:
-        if not route.concept:
-            raise ValueError("Router did not identify an XBRL concept for a structured question.")
-        concept = resolve_concept(route.concept, company, llm)
-        structured = structured_query([item["id"] for item in filings], concept, route.aggregation or "value")
-        if not structured:
-            raise LookupError(f"No structured fact matched concept {concept} in the resolved filing period.")
-    narrative: list[dict[str, str]] = []
-    if route.intent in {"narrative", "hybrid"}:
-        # For hybrid requests the same resolved filing period from SQL scopes the explanatory search.
-        narrative = narrative_search(question, filings, route.section_hint, llm)
-    if route.intent == "aggregate":
-        # This is presentation only; the number is exactly the SQL result, not model arithmetic.
-        answer = str(structured)
-    else:
-        answer = llm.synthesize(question, structured, narrative)
-    return Answer(answer=answer, intent=route.intent, structured_evidence=structured, narrative_evidence=narrative)
+    trace = QueryTrace.start(company, question, route.model_dump())
+    try:
+        filings = resolve_filing_periods(company, route.periods, trace)
+        structured: list[dict[str, Any]] = []
+        if route.intent in {"aggregate", "hybrid"}:
+            if not route.concept:
+                raise ValueError("Router did not identify an XBRL concept for a structured question.")
+            concept = resolve_concept(route.concept, company, llm, trace)
+            structured = structured_query([item["id"] for item in filings], concept, route.aggregation or "value", trace)
+            if not structured:
+                raise LookupError(f"No structured fact matched concept {concept} in the resolved filing period.")
+        narrative: list[dict[str, str]] = []
+        if route.intent in {"narrative", "hybrid"}:
+            # For hybrid requests the same resolved filing period from SQL scopes the explanatory search.
+            narrative = narrative_search(question, filings, route.section_hint, llm, trace)
+        if route.intent == "aggregate":
+            answer = str(structured)  # Presentation only; SQL produced the number.
+        else:
+            answer = llm.synthesize(question, structured, narrative)
+        trace.event("answer_complete", {"structured_evidence_count": len(structured), "narrative_evidence_count": len(narrative)})
+        trace.complete()
+        return Answer(answer=answer, intent=route.intent, trace_id=trace.id, structured_evidence=structured, narrative_evidence=narrative)
+    except Exception as exc:
+        trace.fail(exc)
+        raise
