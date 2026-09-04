@@ -12,7 +12,7 @@ from app.ingestion import cross_check_xbrl_pdf
 from app.llm import LLMService
 
 SCALE = re.compile(r"(?:\$|US\$)?\s*\(?\s*in\s+(thousands|millions|billions)\s*(?:of\s+dollars)?\s*\)?", re.I)
-FOOTNOTE = re.compile(r"(?<=\d)[*†‡a-zA-Z]+$")
+FOOTNOTE = re.compile(r"(?<=[\d\)])[*†‡a-zA-Z]+$")
 NUMBER = re.compile(r"^\(?\$?\s*([\d,]+(?:\.\d+)?)\)?$")
 MULTIPLIER = {"thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
 

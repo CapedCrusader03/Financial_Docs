@@ -67,8 +67,9 @@ class EdgarClient:
     def select_filing(self, ticker: str, form: str, accession: str | None = None) -> FilingRef:
         filings = self.list_filings(ticker, form)
         if accession:
+            clean = accession.replace("-", "")
             for filing in filings:
-                if filing.accession == accession:
+                if filing.accession == accession or filing.accession.replace("-", "") == clean:
                     return filing
             raise ValueError(f"{accession} is not a recent {form} for {ticker}.")
         if not filings:

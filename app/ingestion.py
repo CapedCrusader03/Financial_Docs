@@ -38,7 +38,7 @@ def _store_xbrl_facts(filing_id: str, accession: str, payload: dict[str, Any]) -
         for concept, body in concepts.items():
             for unit_name, facts in body.get("units", {}).items():
                 for fact in facts:
-                    if fact.get("accn") != accession or fact.get("form") not in {"10-K", "10-Q"}:
+                    if str(fact.get("accn", "")).replace("-", "") != accession or fact.get("form") not in {"10-K", "10-Q"}:
                         continue
                     try:
                         value = Decimal(str(fact["val"]))

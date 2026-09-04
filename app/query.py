@@ -1,4 +1,5 @@
 """Query router and deterministic SQL templates for financial facts."""
+import re
 from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
@@ -109,19 +110,30 @@ def structured_query(filing_ids: list[str], concept: str, aggregation: str) -> l
 def narrative_search(question: str, filings: list[dict[str, Any]], section_hint: str | None, llm: LLMService) -> list[dict[str, str]]:
     embedding = llm.embed([question])[0]
     ids = [item["id"] for item in filings]
-    section_filter = f"%{section_hint}%" if section_hint else "%"
+    filters: list[str] = []
+    if section_hint:
+        filters.append(f"%{section_hint}%")
+        item_match = re.search(r"item\s+[0-9a-z]+", section_hint, re.IGNORECASE)
+        if item_match:
+            filters.append(f"%{item_match.group(0)}%")
+    filters.append("%")
+
+    candidates: list[dict[str, str]] = []
     with connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """SELECT nc.section, nc.text, f.fiscal_period, 1 - (nc.embedding <=> %s::vector) AS semantic_score
-               FROM narrative_chunks nc JOIN filings f ON f.id=nc.filing_id
-               WHERE nc.filing_id=ANY(%s::uuid[]) AND nc.section ILIKE %s
-               ORDER BY nc.embedding <=> %s::vector LIMIT 8""",
-            (vector_literal(embedding), ids, section_filter, vector_literal(embedding)),
-        )
-        candidates = [
-            {"section": row[0], "text": row[1], "fiscal_period": row[2], "semantic_score": row[3]}
-            for row in cur.fetchall()
-        ]
+        for section_filter in filters:
+            cur.execute(
+                """SELECT nc.section, nc.text, f.fiscal_period, 1 - (nc.embedding <=> %s::vector) AS semantic_score
+                   FROM narrative_chunks nc JOIN filings f ON f.id=nc.filing_id
+                   WHERE nc.filing_id=ANY(%s::uuid[]) AND nc.section ILIKE %s
+                   ORDER BY nc.embedding <=> %s::vector LIMIT 8""",
+                (vector_literal(embedding), ids, section_filter, vector_literal(embedding)),
+            )
+            candidates = [
+                {"section": row[0], "text": row[1], "fiscal_period": row[2], "semantic_score": row[3]}
+                for row in cur.fetchall()
+            ]
+            if candidates:
+                break
     order = llm.judge_rerank(question, candidates)
     return [candidates[index] for index in order[:4]]
 
